@@ -1,3 +1,4 @@
+const { func } = require('joi');
 const mongoose = require('mongoose');
 
 const permissionsSchema = new mongoose.Schema({
@@ -298,3 +299,301 @@ const permissionsSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 
 });
+
+// Indexes for performance
+permissionSchema.index({ name: 1 });
+permissionSchema.index({ resource: 1, action: 1 });
+permissionSchema.index({ category: 1 });
+permissionSchema.index({ status: 1 });
+permissionSchema.index({ isDeleted: 1 });
+permissionSchema.index({ riskLevel: 1 });
+permissionSchema.index({ tags: 1 });
+
+// Virtual for full permission identifier
+permissionSchema.virtual('fullName').get(function(){
+    return `${this.resource}:${this.action}`;
+})
+
+// Virtual for checking if permission is high risk
+permissionsSchema.virtual('isHighRisk').get(function(){
+    return ['high', 'critical'].includes(this.riskLevel);
+})
+
+// Pre-save middleware to generate name if not provided
+permissionsSchema.pre('save', function(next){
+    if (!this.name && this.resource && this.action) {
+    this.name = `${this.resource}:${this.action}`;
+    if (this.scope && this.scope !== 'own') {
+      this.name += `:${this.scope}`;
+    }
+  }
+    next();
+});
+
+// Pre-save middleware to handle permission hierarchy
+permissionSchema.pre('save', async function(next) {
+  // If parent permission is set, add this permission to parent's children
+  if (this.parentPermission && this.isModified('parentPermission')) {
+    await this.constructor.findByIdAndUpdate(
+      this.parentPermission,
+      { $addToSet: { childPermissions: this._id } }
+    );
+  }
+  next();
+});
+
+// Instance method to check if user meets conditions
+permissionSchema.methods.checkConditions = function(user, context = {}) {
+  const conditions = this.conditions || {};
+  
+  // Check time restrictions
+  if (conditions.timeRestrictions) {
+    const now = new Date();
+    const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+    const currentDay = now.toLocaleDateString('en-US', { weekday: 'lowercase' });
+    
+    const { allowedHours, allowedDays } = conditions.timeRestrictions;
+    
+    if (allowedHours && allowedHours.start && allowedHours.end) {
+      if (currentTime < allowedHours.start || currentTime > allowedHours.end) {
+        return false;
+      }
+    }
+    
+    if (allowedDays && allowedDays.length > 0) {
+      if (!allowedDays.includes(currentDay)) {
+        return false;
+      }
+    }
+  }
+  
+  // Check IP restrictions
+  if (conditions.ipRestrictions && context.userIP) {
+    const { allowedRanges, blockedRanges } = conditions.ipRestrictions;
+    
+    if (allowedRanges && allowedRanges.length > 0) {
+      // Check if IP is in allowed ranges
+      const isAllowed = allowedRanges.some(range => {
+        return this.isIPInRange(context.userIP, range);
+      });
+      if (!isAllowed) return false;
+    }
+    
+    if (blockedRanges && blockedRanges.length > 0) {
+      // Check if IP is in blocked ranges
+      const isBlocked = blockedRanges.some(range => {
+        return this.isIPInRange(context.userIP, range);
+      });
+      if (isBlocked) return false;
+    }
+  }
+  
+  // Check data filters
+  if (conditions.dataFilters && context.requestedData) {
+    const { maxRecords, allowedFields, restrictedFields } = conditions.dataFilters;
+    
+    if (maxRecords && context.requestedData.count > maxRecords) {
+      return false;
+    }
+    
+    if (allowedFields && context.requestedData.fields) {
+      const hasDisallowedField = context.requestedData.fields.some(
+        field => !allowedFields.includes(field)
+      );
+      if (hasDisallowedField) return false;
+    }
+    
+    if (restrictedFields && context.requestedData.fields) {
+      const hasRestrictedField = context.requestedData.fields.some(
+        field => restrictedFields.includes(field)
+      );
+      if (hasRestrictedField) return false;
+    }
+  }
+  
+  return true;
+};
+
+// Helper method to check if IP is in range
+permissionSchema.methods.isIPInRange = function(ip, range) {
+  // Simple IP range check - in production, use a proper IP library
+  if (range.includes('/')) {
+    // CIDR notation
+    const [rangeIP, mask] = range.split('/');
+    // Implement CIDR checking logic here
+    return ip.startsWith(rangeIP.split('.').slice(0, parseInt(mask) / 8).join('.'));
+  } else {
+    // Single IP
+    return ip === range;
+  }
+};
+
+// Instance method to check dependencies
+permissionSchema.methods.checkDependencies = async function(userPermissions) {
+  if (!this.requiredPermissions || this.requiredPermissions.length === 0) {
+    return true;
+  }
+  
+  const userPermissionIds = userPermissions.map(p => p.toString());
+  
+  // Check if all required permissions are present
+  const hasAllRequired = this.requiredPermissions.every(reqPerm => 
+    userPermissionIds.includes(reqPerm.toString())
+  );
+  
+  return hasAllRequired;
+};
+
+// Instance method to check conflicts
+permissionSchema.methods.checkConflicts = async function(userPermissions) {
+  if (!this.conflictingPermissions || this.conflictingPermissions.length === 0) {
+    return false; // No conflicts
+  }
+  
+  const userPermissionIds = userPermissions.map(p => p.toString());
+  
+  // Check if any conflicting permissions are present
+  const hasConflict = this.conflictingPermissions.some(conflictPerm => 
+    userPermissionIds.includes(conflictPerm.toString())
+  );
+  
+  return hasConflict;
+};
+
+// Instance method to increment usage stats
+permissionSchema.methods.incrementUsage = function() {
+  this.usageStats.usageCount += 1;
+  this.usageStats.lastUsed = new Date();
+  return this.save();
+};
+
+// Instance method to add change to history
+permissionSchema.methods.addToChangeHistory = function(action, changedBy, details, reason) {
+  this.changeHistory.push({
+    action,
+    changedBy,
+    changedAt: new Date(),
+    details,
+    reason
+  });
+};
+
+// Static method to find by resource and action
+permissionSchema.statics.findByResourceAction = function(resource, action, scope = null) {
+  const query = { resource, action, isDeleted: false };
+  if (scope) query.scope = scope;
+  return this.findOne(query);
+};
+
+// Static method to find by category
+permissionSchema.statics.findByCategory = function(category) {
+  return this.find({ 
+    category, 
+    status: 'active', 
+    isDeleted: false 
+  });
+};
+
+// Static method to find system permissions
+permissionSchema.statics.findSystemPermissions = function() {
+  return this.find({ 
+    isSystemPermission: true, 
+    isDeleted: false 
+  });
+};
+
+// Static method to find high-risk permissions
+permissionSchema.statics.findHighRisk = function() {
+  return this.find({ 
+    riskLevel: { $in: ['high', 'critical'] }, 
+    status: 'active', 
+    isDeleted: false 
+  });
+};
+
+// Static method to build permission tree by category
+permissionSchema.statics.buildCategoryTree = async function() {
+  const permissions = await this.find({ isDeleted: false })
+    .populate('parentPermission')
+    .populate('childPermissions')
+    .sort({ category: 1, subcategory: 1, name: 1 });
+  
+  const categoryTree = {};
+  
+  permissions.forEach(permission => {
+    const category = permission.category;
+    const subcategory = permission.subcategory || 'general';
+    
+    if (!categoryTree[category]) {
+      categoryTree[category] = {};
+    }
+    
+    if (!categoryTree[category][subcategory]) {
+      categoryTree[category][subcategory] = [];
+    }
+    
+    categoryTree[category][subcategory].push(permission);
+  });
+  
+  return categoryTree;
+};
+
+// Static method to validate permission set
+permissionSchema.statics.validatePermissionSet = async function(permissionIds) {
+  const permissions = await this.find({ 
+    _id: { $in: permissionIds }, 
+    isDeleted: false 
+  });
+  
+  const errors = [];
+  
+  // Check for conflicts
+  for (const permission of permissions) {
+    if (permission.conflictingPermissions && permission.conflictingPermissions.length > 0) {
+      const conflicts = permission.conflictingPermissions.filter(conflictId =>
+        permissionIds.includes(conflictId.toString())
+      );
+      
+      if (conflicts.length > 0) {
+        errors.push({
+          type: 'conflict',
+          permission: permission.name,
+          conflicts: conflicts
+        });
+      }
+    }
+  }
+  
+  // Check for missing dependencies
+  for (const permission of permissions) {
+    if (permission.requiredPermissions && permission.requiredPermissions.length > 0) {
+      const missingDeps = permission.requiredPermissions.filter(reqId =>
+        !permissionIds.includes(reqId.toString())
+      );
+      
+      if (missingDeps.length > 0) {
+        errors.push({
+          type: 'missing_dependency',
+          permission: permission.name,
+          missingDependencies: missingDeps
+        });
+      }
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+};
+
+// Query middleware to exclude soft deleted documents
+permissionSchema.pre(/^find/, function(next) {
+  if (!this.getQuery().isDeleted) {
+    this.find({ isDeleted: { $ne: true } });
+  }
+  next();
+});
+
+const Permission = mongoose.model('Permission', permissionSchema);
+module.exports = Permission;
