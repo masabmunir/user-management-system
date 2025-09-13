@@ -1,4 +1,4 @@
-const winston = reqiure('winston');
+const winston = require('winston');
 const { time } = require('console');
 const path = require('path');
 const { level } = require('winston');

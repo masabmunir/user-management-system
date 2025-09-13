@@ -6,7 +6,6 @@ const permissionsSchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Permission name is required'],
-    unique: true,
     trim: true,
     lowercase: true,
     maxlength: [100, 'Permission name cannot exceed 100 characters'],
@@ -301,16 +300,16 @@ const permissionsSchema = new mongoose.Schema({
 });
 
 // Indexes for performance
-permissionSchema.index({ name: 1 });
-permissionSchema.index({ resource: 1, action: 1 });
-permissionSchema.index({ category: 1 });
-permissionSchema.index({ status: 1 });
-permissionSchema.index({ isDeleted: 1 });
-permissionSchema.index({ riskLevel: 1 });
-permissionSchema.index({ tags: 1 });
+permissionsSchema.index({ name: 1 });
+permissionsSchema.index({ resource: 1, action: 1 });
+permissionsSchema.index({ category: 1 });
+permissionsSchema.index({ status: 1 });
+permissionsSchema.index({ isDeleted: 1 });
+permissionsSchema.index({ riskLevel: 1 });
+permissionsSchema.index({ tags: 1 });
 
 // Virtual for full permission identifier
-permissionSchema.virtual('fullName').get(function(){
+permissionsSchema.virtual('fullName').get(function(){
     return `${this.resource}:${this.action}`;
 })
 
@@ -331,7 +330,7 @@ permissionsSchema.pre('save', function(next){
 });
 
 // Pre-save middleware to handle permission hierarchy
-permissionSchema.pre('save', async function(next) {
+permissionsSchema.pre('save', async function(next) {
   // If parent permission is set, add this permission to parent's children
   if (this.parentPermission && this.isModified('parentPermission')) {
     await this.constructor.findByIdAndUpdate(
@@ -343,7 +342,7 @@ permissionSchema.pre('save', async function(next) {
 });
 
 // Instance method to check if user meets conditions
-permissionSchema.methods.checkConditions = function(user, context = {}) {
+permissionsSchema.methods.checkConditions = function(user, context = {}) {
   const conditions = this.conditions || {};
   
   // Check time restrictions
@@ -415,7 +414,7 @@ permissionSchema.methods.checkConditions = function(user, context = {}) {
 };
 
 // Helper method to check if IP is in range
-permissionSchema.methods.isIPInRange = function(ip, range) {
+permissionsSchema.methods.isIPInRange = function(ip, range) {
   // Simple IP range check - in production, use a proper IP library
   if (range.includes('/')) {
     // CIDR notation
@@ -429,7 +428,7 @@ permissionSchema.methods.isIPInRange = function(ip, range) {
 };
 
 // Instance method to check dependencies
-permissionSchema.methods.checkDependencies = async function(userPermissions) {
+permissionsSchema.methods.checkDependencies = async function(userPermissions) {
   if (!this.requiredPermissions || this.requiredPermissions.length === 0) {
     return true;
   }
@@ -445,11 +444,11 @@ permissionSchema.methods.checkDependencies = async function(userPermissions) {
 };
 
 // Instance method to check conflicts
-permissionSchema.methods.checkConflicts = async function(userPermissions) {
+permissionsSchema.methods.checkConflicts = async function(userPermissions){methods.checkConflicts = async function(userPermissions) {
   if (!this.conflictingPermissions || this.conflictingPermissions.length === 0) {
     return false; // No conflicts
   }
-  
+}
   const userPermissionIds = userPermissions.map(p => p.toString());
   
   // Check if any conflicting permissions are present
@@ -461,14 +460,14 @@ permissionSchema.methods.checkConflicts = async function(userPermissions) {
 };
 
 // Instance method to increment usage stats
-permissionSchema.methods.incrementUsage = function() {
+permissionsSchema.methods.incrementUsage = function() {
   this.usageStats.usageCount += 1;
   this.usageStats.lastUsed = new Date();
   return this.save();
 };
 
 // Instance method to add change to history
-permissionSchema.methods.addToChangeHistory = function(action, changedBy, details, reason) {
+permissionsSchema.methods.addToChangeHistory = function(action, changedBy, details, reason) {
   this.changeHistory.push({
     action,
     changedBy,
@@ -479,14 +478,14 @@ permissionSchema.methods.addToChangeHistory = function(action, changedBy, detail
 };
 
 // Static method to find by resource and action
-permissionSchema.statics.findByResourceAction = function(resource, action, scope = null) {
+permissionsSchema.statics.findByResourceAction = function(resource, action, scope = null) {
   const query = { resource, action, isDeleted: false };
   if (scope) query.scope = scope;
   return this.findOne(query);
 };
 
 // Static method to find by category
-permissionSchema.statics.findByCategory = function(category) {
+permissionsSchema.statics.findByCategory = function(category) {
   return this.find({ 
     category, 
     status: 'active', 
@@ -495,7 +494,7 @@ permissionSchema.statics.findByCategory = function(category) {
 };
 
 // Static method to find system permissions
-permissionSchema.statics.findSystemPermissions = function() {
+permissionsSchema.statics.findSystemPermissions = function() {
   return this.find({ 
     isSystemPermission: true, 
     isDeleted: false 
@@ -503,7 +502,7 @@ permissionSchema.statics.findSystemPermissions = function() {
 };
 
 // Static method to find high-risk permissions
-permissionSchema.statics.findHighRisk = function() {
+permissionsSchema.statics.findHighRisk = function() {
   return this.find({ 
     riskLevel: { $in: ['high', 'critical'] }, 
     status: 'active', 
@@ -512,7 +511,7 @@ permissionSchema.statics.findHighRisk = function() {
 };
 
 // Static method to build permission tree by category
-permissionSchema.statics.buildCategoryTree = async function() {
+permissionsSchema.statics.buildCategoryTree = async function() {
   const permissions = await this.find({ isDeleted: false })
     .populate('parentPermission')
     .populate('childPermissions')
@@ -539,7 +538,7 @@ permissionSchema.statics.buildCategoryTree = async function() {
 };
 
 // Static method to validate permission set
-permissionSchema.statics.validatePermissionSet = async function(permissionIds) {
+permissionsSchema.statics.validatePermissionSet = async function(permissionIds) {
   const permissions = await this.find({ 
     _id: { $in: permissionIds }, 
     isDeleted: false 
@@ -588,12 +587,12 @@ permissionSchema.statics.validatePermissionSet = async function(permissionIds) {
 };
 
 // Query middleware to exclude soft deleted documents
-permissionSchema.pre(/^find/, function(next) {
+permissionsSchema.pre(/^find/, function(next) {
   if (!this.getQuery().isDeleted) {
     this.find({ isDeleted: { $ne: true } });
   }
   next();
 });
 
-const Permission = mongoose.model('Permission', permissionSchema);
+const Permission = mongoose.model('Permission', permissionsSchema);
 module.exports = Permission;

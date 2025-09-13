@@ -5,7 +5,6 @@ const roleSchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Role name is required'],
-    unique: true,
     trim: true,
     maxlength: [50, 'Role name cannot exceed 50 characters'],
     match: [/^[a-zA-Z0-9_\s-]+$/, 'Role name can only contain letters, numbers, spaces, underscores, and hyphens']
