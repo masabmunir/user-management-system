@@ -1,5 +1,9 @@
+// Load environment variables FIRST, before any other imports
+require('dotenv').config();
+// Now import other modules that need environment variables
+
 const app = require('./app');
-const connectDB = require('./config/db');
+const connectDB = require('./config/database');
 const logger = require('./utils/logger');
 
 require('dotenv').config();
