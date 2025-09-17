@@ -136,210 +136,283 @@ class AuthController {
   /**
    * User login
    */
-  async login(req, res) {
-    try {
-      const { email, password, remember = false } = req.body;
+/**
+ * User login with detailed debugging
+ */
+async login(req, res) {
+  try {
+    const { email, password, remember = false } = req.body;
 
-      if (!email || !password) {
-        return res.status(400).json({
-          success: false,
-          error: 'Email and password are required',
-          code: 'MISSING_CREDENTIALS'
-        });
-      }
-
-      // Find user and include password for verification
-      const user = await User.findOne({ email })
-        .select('+password')
-        .populate({
-          path: 'roles',
-          populate: {
-            path: 'permissions'
-          }
-        });
-
-      if (!user) {
-        await this.logFailedLogin(req, email, 'USER_NOT_FOUND');
-        return res.status(401).json({
-          success: false,
-          error: 'Invalid credentials',
-          code: 'INVALID_CREDENTIALS'
-        });
-      }
-
-      // Check if account is locked
-      if (user.isLocked) {
-        await this.logFailedLogin(req, email, 'ACCOUNT_LOCKED');
-        return res.status(423).json({
-          success: false,
-          error: 'Account is temporarily locked due to too many failed attempts',
-          code: 'ACCOUNT_LOCKED',
-          lockUntil: user.lockUntil
-        });
-      }
-
-      // Check if account is active
-      if (user.status !== 'active') {
-        await this.logFailedLogin(req, email, 'ACCOUNT_INACTIVE');
-        return res.status(401).json({
-          success: false,
-          error: 'Account is not active',
-          code: 'ACCOUNT_INACTIVE',
-          status: user.status
-        });
-      }
-
-      // Verify password
-      const isPasswordValid = await user.correctPassword(password, user.password);
-
-      if (!isPasswordValid) {
-        // Increment login attempts
-        await user.incLoginAttempts();
-        await this.logFailedLogin(req, email, 'INVALID_PASSWORD');
-        
-        return res.status(401).json({
-          success: false,
-          error: 'Invalid credentials',
-          code: 'INVALID_CREDENTIALS'
-        });
-      }
-
-      // Reset login attempts on successful login
-      await user.resetLoginAttempts();
-
-      // Collect permissions from roles
-      const permissions = new Set();
-      user.roles.forEach(role => {
-        role.permissions.forEach(permission => {
-          permissions.add(permission.name);
-        });
+    if (!email || !password) {
+      console.log('Missing credentials');
+      return res.status(400).json({
+        success: false,
+        error: 'Email and password are required',
+        code: 'MISSING_CREDENTIALS'
       });
+    }
 
-      // Generate tokens
-      const tokenPayload = {
-        userId: user._id,
-        email: user.email,
-        username: user.username,
-        roles: user.roles.map(role => role._id),
-        permissions: Array.from(permissions)
-      };
-
-      const tokens = jwtService.generateTokenPair({
-        _id: user._id,
-        email: user.email,
-        username: user.username,
-        roles: user.roles,
-        permissions: Array.from(permissions)
-      });
-
-      // Update user login info
-      await User.findByIdAndUpdate(user._id, {
-        lastLogin: new Date(),
-        lastLoginIP: req.ip,
-        $push: {
-          loginHistory: {
-            ip: req.ip,
-            userAgent: req.get('User-Agent'),
-            loginTime: new Date(),
-            success: true
-          },
-          activeSessions: {
-            sessionId: tokens.sessionId,
-            deviceInfo: req.get('User-Agent'),
-            ip: req.ip,
-            createdAt: new Date(),
-            lastActivity: new Date()
-          }
+    console.log('Step 1: About to find user...');
+    
+    // Find user and include password for verification
+    const user = await User.findOne({ email })
+      .select('+password')
+      .populate({
+        path: 'roles',
+        populate: {
+          path: 'permissions'
         }
       });
 
-      // Log successful login
-      await AuditLog.createEntry({
-        action: 'login',
-        actorType: 'user',
-        userId: user._id,
-        actorDetails: {
-          username: user.username,
-          email: user.email,
-          roles: user.roles.map(role => role.name),
-          ipAddress: req.ip,
-          userAgent: req.get('User-Agent')
-        },
-        targetType: 'user',
-        targetId: user._id,
-        targetDetails: {
-          name: user.fullName,
-          identifier: user.email
-        },
-        resource: 'authentication',
-        status: 'success',
-        category: 'authentication',
-        endpoint: {
-          method: req.method,
-          path: req.path
-        },
-        sessionId: tokens.sessionId
-      });
-
-      logger.info(`User logged in successfully: ${email}`);
-
-      // Prepare response
-      const responseData = {
-        user: {
-          id: user._id,
-          email: user.email,
-          username: user.username,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          fullName: user.fullName,
-          status: user.status,
-          emailVerified: user.emailVerified,
-          twoFactorEnabled: user.twoFactorEnabled,
-          roles: user.roles.map(role => ({
-            id: role._id,
-            name: role.name,
-            displayName: role.displayName,
-            level: role.level
-          })),
-          permissions: Array.from(permissions),
-          lastLogin: user.lastLogin,
-          profile: user.profile
-        },
-        tokens: {
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          tokenType: tokens.tokenType,
-          expiresIn: tokens.expiresIn
-        },
-        sessionId: tokens.sessionId
-      };
-
-      // Set secure HTTP-only cookie for refresh token if remember is true
-      if (remember) {
-        res.cookie('refreshToken', tokens.refreshToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
-          maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-        });
-      }
-
-      res.status(200).json({
-        success: true,
-        message: 'Login successful',
-        data: responseData
-      });
-
-    } catch (error) {
-      logger.error('Login error:', error.message);
-      
-      res.status(500).json({
+    console.log('Step 2: User query completed');
+    console.log('User found:', !!user);
+    
+    if (!user) {
+      console.log('User not found, logging failed attempt');
+      await this.logFailedLogin(req, email, 'USER_NOT_FOUND');
+      return res.status(401).json({
         success: false,
-        error: 'Login failed',
-        code: 'LOGIN_ERROR'
+        error: 'Invalid credentials',
+        code: 'INVALID_CREDENTIALS'
       });
     }
+
+    console.log('Step 3: User validation checks');
+    console.log('User status:', user.status);
+    console.log('User isLocked:', user.isLocked);
+    console.log('User password exists:', !!user.password);
+
+    // Check if account is locked
+    if (user.isLocked) {
+      console.log('Account is locked');
+      await this.logFailedLogin(req, email, 'ACCOUNT_LOCKED');
+      return res.status(423).json({
+        success: false,
+        error: 'Account is temporarily locked due to too many failed attempts',
+        code: 'ACCOUNT_LOCKED',
+        lockUntil: user.lockUntil
+      });
+    }
+
+    // Check if account is active
+    if (user.status !== 'active') {
+      console.log('Account is not active, status:', user.status);
+      await this.logFailedLogin(req, email, 'ACCOUNT_INACTIVE');
+      return res.status(401).json({
+        success: false,
+        error: 'Account is not active',
+        code: 'ACCOUNT_INACTIVE',
+        status: user.status
+      });
+    }
+
+    console.log('Step 4: About to verify password...');
+    
+    // Verify password
+    const isPasswordValid = await user.correctPassword(password, user.password);
+    
+    console.log('Step 5: Password verification completed');
+    console.log('Password valid:', isPasswordValid);
+
+    if (!isPasswordValid) {
+      console.log('Invalid password, incrementing login attempts');
+      // Increment login attempts
+      await user.incLoginAttempts();
+      await this.logFailedLogin(req, email, 'INVALID_PASSWORD');
+      
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials',
+        code: 'INVALID_CREDENTIALS'
+      });
+    }
+
+    console.log('Step 6: Password valid, proceeding with login...');
+    
+    // Reset login attempts on successful login
+    console.log('Step 6a: Resetting login attempts...');
+    await user.resetLoginAttempts();
+    console.log('Step 6b: Login attempts reset completed');
+
+    console.log('Step 7: Processing user roles and permissions...');
+    console.log('User roles count:', user.roles ? user.roles.length : 0);
+    
+    // Collect permissions from roles
+    const permissions = new Set();
+    if (user.roles && user.roles.length > 0) {
+      user.roles.forEach((role, index) => {
+        console.log(`Processing role ${index + 1}:`, role.name);
+        if (role.permissions && role.permissions.length > 0) {
+          role.permissions.forEach(permission => {
+            permissions.add(permission.name);
+          });
+        }
+      });
+    }
+    
+    console.log('Step 8: Permissions collected');
+    console.log('Total permissions:', permissions.size);
+    console.log('Permissions array:', Array.from(permissions));
+
+    console.log('Step 9: Preparing token payload...');
+    
+    // Generate tokens
+    const tokenPayload = {
+      userId: user._id,
+      email: user.email,
+      username: user.username,
+      roles: user.roles.map(role => role._id),
+      permissions: Array.from(permissions)
+    };
+    
+    console.log('Token payload prepared:', {
+      userId: !!tokenPayload.userId,
+      email: !!tokenPayload.email,
+      username: !!tokenPayload.username,
+      rolesCount: tokenPayload.roles.length,
+      permissionsCount: tokenPayload.permissions.length
+    });
+
+    console.log('Step 10: Generating JWT tokens...');
+    
+    const tokens = jwtService.generateTokenPair({
+      _id: user._id,
+      email: user.email,
+      username: user.username,
+      roles: user.roles,
+      permissions: Array.from(permissions)
+    });
+
+    console.log('Step 11: JWT tokens generated successfully');
+    console.log('Access token exists:', !!tokens.accessToken);
+    console.log('Refresh token exists:', !!tokens.refreshToken);
+    console.log('Session ID:', tokens.sessionId);
+
+    console.log('Step 12: Updating user login information...');
+    
+    // Update user login info
+    await User.findByIdAndUpdate(user._id, {
+      lastLogin: new Date(),
+      lastLoginIP: req.ip,
+      $push: {
+        loginHistory: {
+          ip: req.ip,
+          userAgent: req.get('User-Agent'),
+          loginTime: new Date(),
+          success: true
+        },
+        activeSessions: {
+          sessionId: tokens.sessionId,
+          deviceInfo: req.get('User-Agent'),
+          ip: req.ip,
+          createdAt: new Date(),
+          lastActivity: new Date()
+        }
+      }
+    });
+
+    console.log('Step 13: User login info updated successfully');
+    console.log('Step 14: Creating audit log entry...');
+
+    // Log successful login
+    await AuditLog.createEntry({
+      action: 'login',
+      actorType: 'user',
+      userId: user._id,
+      actorDetails: {
+        username: user.username,
+        email: user.email,
+        roles: user.roles.map(role => role.name),
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      },
+      targetType: 'user',
+      targetId: user._id,
+      targetDetails: {
+        name: user.fullName,
+        identifier: user.email
+      },
+      resource: 'authentication',
+      status: 'success',
+      category: 'authentication',
+      endpoint: {
+        method: req.method,
+        path: req.path
+      },
+      sessionId: tokens.sessionId
+    });
+
+    console.log('Step 15: Audit log created successfully');
+    console.log('Step 16: Preparing response data...');
+
+    // Prepare response
+    const responseData = {
+      user: {
+        id: user._id,
+        email: user.email,
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        fullName: user.fullName,
+        status: user.status,
+        emailVerified: user.emailVerified,
+        twoFactorEnabled: user.twoFactorEnabled,
+        roles: user.roles.map(role => ({
+          id: role._id,
+          name: role.name,
+          displayName: role.displayName,
+          level: role.level
+        })),
+        permissions: Array.from(permissions),
+        lastLogin: user.lastLogin,
+        profile: user.profile
+      },
+      tokens: {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        tokenType: tokens.tokenType,
+        expiresIn: tokens.expiresIn
+      },
+      sessionId: tokens.sessionId
+    };
+
+    console.log('Step 17: Response data prepared');
+    
+    // Set secure HTTP-only cookie for refresh token if remember is true
+    if (remember) {
+      console.log('Step 18a: Setting refresh token cookie...');
+      res.cookie('refreshToken', tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+      console.log('Step 18b: Refresh token cookie set');
+    }
+
+    console.log('Step 19: Sending successful response...');
+    console.log('=== LOGIN COMPLETED SUCCESSFULLY ===');
+
+    res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      data: responseData
+    });
+
+  } catch (error) {
+    console.log('=== LOGIN ERROR OCCURRED ===');
+    console.log('Error message:', error.message);
+    console.log('Error stack:', error.stack);
+    
+    logger.error('Login error:', error.message);
+
+    res.status(500).json({
+      success: false,
+      error: 'Login failed',
+      code: 'LOGIN_ERROR'
+    });
   }
+}
 
   /**
    * Refresh access token using refresh token

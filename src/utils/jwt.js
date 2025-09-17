@@ -26,7 +26,7 @@ class JWTService {
         userId: payload.userId,
         email: payload.email,
         username: payload.username,
-        roles: payload.roles,
+        roles: payload.roles.map(role => role._id || role), // Just IDs, not full objects
         permissions: payload.permissions,
         sessionId: payload.sessionId || this.generateSessionId(),
         type: 'access'
