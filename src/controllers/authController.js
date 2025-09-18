@@ -152,8 +152,6 @@ async login(req, res) {
       });
     }
 
-    console.log('Step 1: About to find user...');
-    
     // Find user and include password for verification
     const user = await User.findOne({ email })
       .select('+password')
@@ -164,9 +162,6 @@ async login(req, res) {
         }
       });
 
-    console.log('Step 2: User query completed');
-    console.log('User found:', !!user);
-    
     if (!user) {
       console.log('User not found, logging failed attempt');
       await this.logFailedLogin(req, email, 'USER_NOT_FOUND');
@@ -176,11 +171,6 @@ async login(req, res) {
         code: 'INVALID_CREDENTIALS'
       });
     }
-
-    console.log('Step 3: User validation checks');
-    console.log('User status:', user.status);
-    console.log('User isLocked:', user.isLocked);
-    console.log('User password exists:', !!user.password);
 
     // Check if account is locked
     if (user.isLocked) {
@@ -211,9 +201,6 @@ async login(req, res) {
     // Verify password
     const isPasswordValid = await user.correctPassword(password, user.password);
     
-    console.log('Step 5: Password verification completed');
-    console.log('Password valid:', isPasswordValid);
-
     if (!isPasswordValid) {
       console.log('Invalid password, incrementing login attempts');
       // Increment login attempts
@@ -249,12 +236,6 @@ async login(req, res) {
         }
       });
     }
-    
-    console.log('Step 8: Permissions collected');
-    console.log('Total permissions:', permissions.size);
-    console.log('Permissions array:', Array.from(permissions));
-
-    console.log('Step 9: Preparing token payload...');
     
     // Generate tokens
     const tokenPayload = {
@@ -875,55 +856,85 @@ async login(req, res) {
   /**
    * Change password (authenticated user)
    */
-  async changePassword(req, res) {
-    try {
-      const { currentPassword, newPassword, confirmPassword } = req.body;
+ async changePassword(req, res) {
+  try {
+    console.log('=== CHANGE PASSWORD STARTED ===');
+    console.log('Request body:', req.body);
+    console.log('User ID from token:', req.user?.id);
+    
+    const { currentPassword, newPassword, confirmPassword } = req.body;
 
-      if (!currentPassword || !newPassword || !confirmPassword) {
-        return res.status(400).json({
-          success: false,
-          error: 'All password fields are required',
-          code: 'MISSING_FIELDS'
-        });
-      }
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'All password fields are required',
+        code: 'MISSING_FIELDS'
+      });
+    }
 
-      if (newPassword !== confirmPassword) {
-        return res.status(400).json({
-          success: false,
-          error: 'New passwords do not match',
-          code: 'PASSWORD_MISMATCH'
-        });
-      }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'New passwords do not match',
+        code: 'PASSWORD_MISMATCH'
+      });
+    }
 
-      // Get user with password
-      const user = await User.findById(req.user.id).select('+password');
+    console.log('Step 1: About to find user...');
+    // Get user with password
+    const user = await User.findById(req.user.id).select('+password');
+    console.log('Step 2: User found:', !!user);
 
-      // Verify current password
-      const isCurrentPasswordValid = await user.correctPassword(
-        currentPassword, 
-        user.password
-      );
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        code: 'USER_NOT_FOUND'
+      });
+    }
 
-      if (!isCurrentPasswordValid) {
-        return res.status(400).json({
-          success: false,
-          error: 'Current password is incorrect',
-          code: 'INVALID_CURRENT_PASSWORD'
-        });
-      }
+    console.log('Step 3: About to verify current password...');
+    // Verify current password
+    const isCurrentPasswordValid = await user.correctPassword(
+      currentPassword, 
+      user.password
+    );
+    console.log('Step 4: Current password valid:', isCurrentPasswordValid);
 
-      // Update password
-      user.password = newPassword;
-      user.passwordChangedAt = new Date();
-      
-      // Clear all other sessions except current
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Current password is incorrect',
+        code: 'INVALID_CURRENT_PASSWORD'
+      });
+    }
+
+    console.log('Step 5: About to update password...');
+    // Update password
+    user.password = newPassword;
+    user.passwordChangedAt = new Date();
+    
+    console.log('Step 6: About to handle sessions...');
+    console.log('User activeSessions exists:', !!user.activeSessions);
+    console.log('Current sessionId:', req.tokenInfo?.sessionId);
+    
+    // Handle activeSessions safely
+    if (user.activeSessions && Array.isArray(user.activeSessions)) {
       user.activeSessions = user.activeSessions.filter(
-        session => session.sessionId === req.tokenInfo.sessionId
+        session => session.sessionId === req.tokenInfo?.sessionId
       );
+    } else {
+      // If activeSessions doesn't exist, initialize it
+      user.activeSessions = [];
+    }
 
-      await user.save();
+    console.log('Step 7: About to save user...');
+    await user.save();
+    console.log('Step 8: User saved successfully');
 
-      // Log password change
+    console.log('Step 9: About to create audit log...');
+    // Log password change - wrap in try-catch to isolate audit log issues
+    try {
       await AuditLog.createEntry({
         action: 'password_change',
         actorType: 'user',
@@ -939,26 +950,36 @@ async login(req, res) {
         resource: 'authentication',
         status: 'success',
         category: 'security',
-        sessionId: req.tokenInfo.sessionId
+        sessionId: req.tokenInfo?.sessionId
       });
-
-      logger.info(`Password changed for user: ${user.email}`);
-
-      res.status(200).json({
-        success: true,
-        message: 'Password changed successfully'
-      });
-
-    } catch (error) {
-      logger.error('Change password error:', error.message);
-      
-      res.status(500).json({
-        success: false,
-        error: 'Password change failed',
-        code: 'CHANGE_PASSWORD_ERROR'
-      });
+      console.log('Step 10: Audit log created successfully');
+    } catch (auditError) {
+      console.log('Audit log error (non-critical):', auditError.message);
+      // Continue execution even if audit log fails
     }
+
+    logger.info(`Password changed for user: ${user.email}`);
+    console.log('=== CHANGE PASSWORD COMPLETED ===');
+
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+
+  } catch (error) {
+    console.log('=== CHANGE PASSWORD ERROR ===');
+    console.log('Error message:', error.message);
+    console.log('Error stack:', error.stack);
+    
+    logger.error('Change password error:', error.message);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Password change failed',
+      code: 'CHANGE_PASSWORD_ERROR'
+    });
   }
+}
 
   /**
    * Log failed login attempts

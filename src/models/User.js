@@ -114,7 +114,36 @@ const userSchema = new mongoose.Schema({
   lockUntil: Date,
   lastLogin: Date,
   lastLoginIP: String,
-  
+
+// Login History and Session Management
+loginHistory: [{
+  ip: String,
+  userAgent: String,
+  location: String,
+  loginTime: {
+    type: Date,
+    default: Date.now
+  },
+  success: {
+    type: Boolean,
+    default: true
+  }
+}],
+
+// Session Management
+activeSessions: [{
+  sessionId: String,
+  deviceInfo: String,
+  ip: String,
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  lastActivity: {
+    type: Date,
+    default: Date.now
+  }
+}],
   // Preferences & Settings
   preferences: {
     language: {
