@@ -13,6 +13,7 @@ const notFound = require('./middleware/notFound');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
+const emailRoute = require('./routes/emailRoutes');
 
 const app = express();
 
@@ -34,13 +35,13 @@ app.use(helmet({
 // CORS configuration
 const corsOptions = {
   origin: function (origin, callback) {
-    const allowedOrigins = process.env.CORS_ORIGIN 
+    const allowedOrigins = process.env.CORS_ORIGIN
       ? process.env.CORS_ORIGIN.split(',')
       : ['http://localhost:3000', 'http://localhost:3001'];
-    
+
     // Allow requests with no origin (like mobile apps or Postman)
     if (!origin) return callback(null, true);
-    
+
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -108,7 +109,8 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/auth', authRoutes);
-
+app.use('/api/email', emailRoute);
+console.log("email endPoint is working", emailRoute)
 // API documentation endpoint
 app.get('/api', (req, res) => {
   res.status(200).json({
@@ -127,6 +129,11 @@ app.get('/api', (req, res) => {
         'POST /api/auth/reset-password': 'Reset password with token',
         'POST /api/auth/change-password': 'Change password',
         'GET /api/auth/verify-token': 'Verify token validity'
+      },
+      email: {  // Add this section
+        'POST /api/email/send-verification': 'Send email verification',
+        'GET /api/email/verify/:token': 'Verify email with token',
+        'POST /api/email/resend-verification': 'Resend verification email'
       }
     },
     documentation: 'https://your-app-docs.com'

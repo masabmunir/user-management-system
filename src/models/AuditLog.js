@@ -12,7 +12,7 @@ const auditLogSchema = new mongoose.Schema({
             'account_locked', 'account_unlocked', 'account_suspended', 'account_activated',
             'export_data', 'import_data', 'backup_created', 'system_config_changed',
             'api_access', 'file_upload', 'file_download', 'report_generated',
-            'custom'
+            'custom', 'email_verification_sent', 'email_verification_resent', 
         ]
     },
 

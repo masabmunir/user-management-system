@@ -34,7 +34,7 @@ const userSchema = new mongoose.Schema({
     maxlength: [30, 'Username cannot exceed 30 characters'],
     match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores']
   },
-  
+
   // Authentication
   password: {
     type: String,
@@ -42,21 +42,21 @@ const userSchema = new mongoose.Schema({
     minlength: [8, 'Password must be at least 8 characters long'],
     select: false
   },
-  
+
   // User Status & Lifecycle
   status: {
     type: String,
     enum: ['active', 'inactive', 'suspended', 'pending', 'blocked'],
     default: 'pending'
   },
-  
+
   // Role & Permissions
   roles: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Role',
     required: true
   }],
-  
+
   // Profile Information
   profile: {
     avatar: {
@@ -82,7 +82,7 @@ const userSchema = new mongoose.Schema({
       maxlength: [500, 'Bio cannot exceed 500 characters']
     }
   },
-  
+
   // Security Features
   emailVerified: {
     type: Boolean,
@@ -90,12 +90,12 @@ const userSchema = new mongoose.Schema({
   },
   emailVerificationToken: String,
   emailVerificationExpires: Date,
-  
+
   // Password Reset
   passwordResetToken: String,
   passwordResetExpires: Date,
   passwordChangedAt: Date,
-  
+
   // Multi-Factor Authentication
   twoFactorEnabled: {
     type: Boolean,
@@ -105,7 +105,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     select: false
   },
-  
+
+  // Email Verification
+  emailVerificationToken: String,
+  emailVerificationExpires: Date,
+
   // Security & Login Tracking
   loginAttempts: {
     type: Number,
@@ -115,35 +119,35 @@ const userSchema = new mongoose.Schema({
   lastLogin: Date,
   lastLoginIP: String,
 
-// Login History and Session Management
-loginHistory: [{
-  ip: String,
-  userAgent: String,
-  location: String,
-  loginTime: {
-    type: Date,
-    default: Date.now
-  },
-  success: {
-    type: Boolean,
-    default: true
-  }
-}],
+  // Login History and Session Management
+  loginHistory: [{
+    ip: String,
+    userAgent: String,
+    location: String,
+    loginTime: {
+      type: Date,
+      default: Date.now
+    },
+    success: {
+      type: Boolean,
+      default: true
+    }
+  }],
 
-// Session Management
-activeSessions: [{
-  sessionId: String,
-  deviceInfo: String,
-  ip: String,
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  lastActivity: {
-    type: Date,
-    default: Date.now
-  }
-}],
+  // Session Management
+  activeSessions: [{
+    sessionId: String,
+    deviceInfo: String,
+    ip: String,
+    createdAt: {
+      type: Date,
+      default: Date.now
+    },
+    lastActivity: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   // Preferences & Settings
   preferences: {
     language: {
@@ -160,7 +164,7 @@ activeSessions: [{
       default: 'light'
     }
   },
-  
+
   // Audit Trail
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -170,7 +174,7 @@ activeSessions: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
-  
+
   // Soft Delete
   isDeleted: {
     type: Boolean,
@@ -181,7 +185,7 @@ activeSessions: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }
-  
+
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
@@ -196,19 +200,19 @@ userSchema.index({ roles: 1 });
 userSchema.index({ isDeleted: 1 });
 
 // Virtual for full name
-userSchema.virtual('fullName').get(function() {
+userSchema.virtual('fullName').get(function () {
   return `${this.firstName} ${this.lastName}`;
 });
 
 // Virtual for account locked status
-userSchema.virtual('isLocked').get(function() {
+userSchema.virtual('isLocked').get(function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 });
 
 // Pre-save middleware to hash password
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
-  
+
   try {
     this.password = await bcrypt.hash(this.password, 12);
     next();
@@ -218,20 +222,20 @@ userSchema.pre('save', async function(next) {
 });
 
 // Pre-save middleware to set passwordChangedAt
-userSchema.pre('save', function(next) {
+userSchema.pre('save', function (next) {
   if (!this.isModified('password') || this.isNew) return next();
-  
+
   this.passwordChangedAt = Date.now() - 1000;
   next();
 });
 
 // Instance method to check password
-userSchema.methods.correctPassword = async function(candidatePassword, userPassword) {
+userSchema.methods.correctPassword = async function (candidatePassword, userPassword) {
   return await bcrypt.compare(candidatePassword, userPassword);
 };
 
 // Instance method to check if password changed after JWT was issued
-userSchema.methods.changedPasswordAfter = function(JWTTimestamp) {
+userSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
   if (this.passwordChangedAt) {
     const changedTimestamp = parseInt(
       this.passwordChangedAt.getTime() / 1000,
@@ -243,35 +247,35 @@ userSchema.methods.changedPasswordAfter = function(JWTTimestamp) {
 };
 
 // Instance method to create password reset token
-userSchema.methods.createPasswordResetToken = function() {
+userSchema.methods.createPasswordResetToken = function () {
   const resetToken = crypto.randomBytes(32).toString('hex');
-  
+
   this.passwordResetToken = crypto
     .createHash('sha256')
     .update(resetToken)
     .digest('hex');
-    
+
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
-  
+
   return resetToken;
 };
 
 // Instance method to create email verification token
-userSchema.methods.createEmailVerificationToken = function() {
+userSchema.methods.createEmailVerificationToken = function () {
   const verificationToken = crypto.randomBytes(32).toString('hex');
-  
+
   this.emailVerificationToken = crypto
     .createHash('sha256')
     .update(verificationToken)
     .digest('hex');
-    
+
   this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-  
+
   return verificationToken;
 };
 
 // Instance method to increment login attempts
-userSchema.methods.incLoginAttempts = function() {
+userSchema.methods.incLoginAttempts = function () {
   // If we have a previous lock that has expired, restart at 1
   if (this.lockUntil && this.lockUntil < Date.now()) {
     return this.updateOne({
@@ -283,19 +287,19 @@ userSchema.methods.incLoginAttempts = function() {
       }
     });
   }
-  
+
   const updates = { $inc: { loginAttempts: 1 } };
-  
+
   // Lock account after 5 failed attempts for 2 hours
   if (this.loginAttempts + 1 >= 5 && !this.isLocked) {
     updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 };
   }
-  
+
   return this.updateOne(updates);
 };
 
 // Instance method to reset login attempts
-userSchema.methods.resetLoginAttempts = function() {
+userSchema.methods.resetLoginAttempts = function () {
   return this.updateOne({
     $unset: {
       loginAttempts: 1,
@@ -304,16 +308,34 @@ userSchema.methods.resetLoginAttempts = function() {
   });
 };
 
+// Instance method to create email verification token
+userSchema.methods.createEmailVerificationToken = function() {
+  // Generate random token
+  const verifyToken = crypto.randomBytes(32).toString('hex');
+  
+  // Hash token and set to emailVerificationToken field
+  this.emailVerificationToken = crypto
+    .createHash('sha256')
+    .update(verifyToken)
+    .digest('hex');
+    
+  // Set expiration time (24 hours from now)
+  this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
+  
+  // Return unhashed token to send via email
+  return verifyToken;
+};
+
 // Static method to find active users
-userSchema.statics.findActive = function() {
-  return this.find({ 
-    status: 'active', 
-    isDeleted: false 
+userSchema.statics.findActive = function () {
+  return this.find({
+    status: 'active',
+    isDeleted: false
   });
 };
 
 // Query middleware to exclude soft deleted documents
-userSchema.pre(/^find/, function(next) {
+userSchema.pre(/^find/, function (next) {
   if (!this.getQuery().isDeleted) {
     this.find({ isDeleted: { $ne: true } });
   }
