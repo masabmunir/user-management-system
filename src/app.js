@@ -110,7 +110,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoute);
-console.log("email endPoint is working", emailRoute)
+
 // API documentation endpoint
 app.get('/api', (req, res) => {
   res.status(200).json({
