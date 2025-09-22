@@ -14,6 +14,7 @@ const notFound = require('./middleware/notFound');
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const emailRoute = require('./routes/emailRoutes');
+const userRoutes = require('./routes/userRoutes');
 
 const app = express();
 
@@ -110,6 +111,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoute);
+app.use('api/users', userRoutes)
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
@@ -134,6 +136,17 @@ app.get('/api', (req, res) => {
         'POST /api/email/send-verification': 'Send email verification',
         'GET /api/email/verify/:token': 'Verify email with token',
         'POST /api/email/resend-verification': 'Resend verification email'
+      },
+       user_management: {
+        'GET /api/users': 'Get all users (with pagination, filtering)',
+        'GET /api/users/stats': 'Get user statistics',
+        'GET /api/users/:userId': 'Get single user by ID',
+        'PUT /api/users/:userId': 'Update user information',
+        'DELETE /api/users/:userId': 'Delete user (soft delete)',
+        'PATCH /api/users/:userId/status': 'Update user status',
+        'POST /api/users/:userId/roles': 'Assign roles to user',
+        'DELETE /api/users/:userId/roles/:roleId': 'Remove role from user',
+        'GET /api/users/:userId/permissions': 'Get user permissions'
       }
     },
     documentation: 'https://your-app-docs.com'
