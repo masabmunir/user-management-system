@@ -1,4 +1,4 @@
-const { User, Role, Permission, AuditLog } = require('../models');
+const { User, Role, AuditLog } = require('../models');
 const logger = require('../utils/logger');
 
 class UserController {

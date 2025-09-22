@@ -111,7 +111,7 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoute);
-app.use('api/users', userRoutes)
+app.use('/api/users', userRoutes)
 
 // API documentation endpoint
 app.get('/api', (req, res) => {

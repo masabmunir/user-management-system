@@ -49,7 +49,8 @@ const auditLogSchema = new mongoose.Schema({
     targetId: {
         type: mongoose.Schema.Types.ObjectId,
         required: function() {
-            return ['user', 'role', 'permission'].includes(this.targetType);
+            // Don't require targetId for list operations
+            return !['user', 'role', 'permission'].includes(this.targetType);
         }
     },
 
