@@ -600,22 +600,22 @@ class UserController {
         isDeleted: { $ne: true }
       });
 
-      // Log activity
-      await AuditLog.createEntry({
-        action: 'read',
-        actorType: 'user',
-        userId: req.user.id,
-        actorDetails: {
-          username: req.user.username,
-          email: req.user.email,
-          ipAddress: req.ip,
-          userAgent: req.get('User-Agent')
-        },
-        targetType: 'system',
-        resource: 'user_statistics',
-        status: 'success',
-        category: 'user_management'
-      });
+    await AuditLog.createEntry({
+      action: 'read',
+      actorType: 'user',
+      userId: req.user.id,
+      actorDetails: {
+        username: req.user.username,
+        email: req.user.email,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      },
+      targetType: 'system',
+      targetId: req.user.id, // Add this since your model requires it
+      resource: 'user_statistics',
+      status: 'success',
+      category: 'user_management'
+    });
 
       res.status(200).json({
         success: true,
