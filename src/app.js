@@ -15,6 +15,7 @@ const notFound = require('./middleware/notFound');
 const authRoutes = require('./routes/authRoutes');
 const emailRoute = require('./routes/emailRoutes');
 const userRoutes = require('./routes/userRoutes');
+const roleRoutes = require('./routes/roleRoutes')
 
 const app = express();
 
@@ -112,6 +113,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoute);
 app.use('/api/users', userRoutes)
+app.use('/api/role', roleRoutes)
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
@@ -137,7 +139,7 @@ app.get('/api', (req, res) => {
         'GET /api/email/verify/:token': 'Verify email with token',
         'POST /api/email/resend-verification': 'Resend verification email'
       },
-       user_management: {
+      user_management: {
         'GET /api/users': 'Get all users (with pagination, filtering)',
         'GET /api/users/stats': 'Get user statistics',
         'GET /api/users/:userId': 'Get single user by ID',
@@ -147,6 +149,15 @@ app.get('/api', (req, res) => {
         'POST /api/users/:userId/roles': 'Assign roles to user',
         'DELETE /api/users/:userId/roles/:roleId': 'Remove role from user',
         'GET /api/users/:userId/permissions': 'Get user permissions'
+      },
+      role_management: {
+        'GET /api/roles': 'Get all roles (with pagination, filtering)',
+        'GET /api/roles/stats': 'Get role statistics and analytics',
+        'GET /api/roles/hierarchy': 'Get role hierarchy tree',
+        'GET /api/roles/:roleId': 'Get single role by ID',
+        'POST /api/roles': 'Create a new role',
+        'PUT /api/roles/:roleId': 'Update existing role',
+        'DELETE /api/roles/:roleId': 'Delete role (soft delete)'
       }
     },
     documentation: 'https://your-app-docs.com'
