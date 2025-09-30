@@ -16,6 +16,7 @@ const authRoutes = require('./routes/authRoutes');
 const emailRoute = require('./routes/emailRoutes');
 const userRoutes = require('./routes/userRoutes');
 const roleRoutes = require('./routes/roleRoutes')
+const permissionRoutes = require('./routes/permissionRoutes');
 
 const app = express();
 
@@ -114,6 +115,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoute);
 app.use('/api/users', userRoutes)
 app.use('/api/roles', roleRoutes)
+app.use('/api/permissions', permissionRoutes);
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
@@ -158,6 +160,15 @@ app.get('/api', (req, res) => {
         'POST /api/roles': 'Create a new role',
         'PUT /api/roles/:roleId': 'Update existing role',
         'DELETE /api/roles/:roleId': 'Delete role (soft delete)'
+      },
+      permission_management: {
+        'GET /api/permissions': 'Get all permissions (with filtering)',
+        'GET /api/permissions/stats': 'Get permission statistics',
+        'GET /api/permissions/categories': 'Get permission categories',
+        'GET /api/permissions/:permissionId': 'Get single permission by ID',
+        'POST /api/permissions': 'Create a new permission',
+        'PUT /api/permissions/:permissionId': 'Update existing permission',
+        'DELETE /api/permissions/:permissionId': 'Delete permission (soft delete)'
       }
     },
     documentation: 'https://your-app-docs.com'

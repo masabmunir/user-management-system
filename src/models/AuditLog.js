@@ -12,7 +12,7 @@ const auditLogSchema = new mongoose.Schema({
             'account_locked', 'account_unlocked', 'account_suspended', 'account_activated',
             'export_data', 'import_data', 'backup_created', 'system_config_changed',
             'api_access', 'file_upload', 'file_download', 'report_generated',
-            'custom', 'email_verification_sent', 'email_verification_resent','role_management'
+            'custom', 'email_verification_sent', 'email_verification_resent','role_management','permission_management'
         ]
     },
 
@@ -196,7 +196,7 @@ const auditLogSchema = new mongoose.Schema({
         enum: [
             'authentication', 'authorization', 'user_management', 'data_access',
             'system_administration', 'security', 'compliance', 'api_usage',
-            'file_operations', 'reporting', 'configuration', 'custom','role_management'
+            'file_operations', 'reporting', 'configuration', 'custom','role_management','permission_management'
         ],
         default: 'custom'
     },
