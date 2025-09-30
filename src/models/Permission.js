@@ -38,7 +38,7 @@ const permissionsSchema = new mongoose.Schema({
   action: {
     type: String,
     required: [true, 'Action is required'],
-    enum: ['create', 'read', 'update', 'delete', 'execute', 'manage', 'approve', 'reject', 'export', 'import'],
+    enum: ['create', 'read', 'update', 'delete', 'execute', 'manage', 'approve', 'reject', 'export', 'import','generate'],
     lowercase: true
   },
   
