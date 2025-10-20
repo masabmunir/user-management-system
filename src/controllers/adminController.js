@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const csv = require('csv-parser');
 const { createObjectCsvStringifier } = require('csv-writer');
 const fs = require('fs').promises;
+const streamFs = require('fs');
 const path = require('path');
 
 class AdminController {
@@ -230,159 +231,181 @@ class AdminController {
   }
 
   // Bulk User Import (CSV)
-  async bulkImportUsers(req, res) {
-    try {
-      if (!req.file) {
+async bulkImportUsers(req, res) {
+  try {
+    console.log('=== BULK IMPORT STARTED ===');
+    
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'CSV file is required',
+        code: 'FILE_REQUIRED'
+      });
+    }
+
+    const results = [];
+    const errors = [];
+    let successCount = 0;
+    let errorCount = 0;
+    let rowNumber = 1;
+
+    // Use csv-parser for proper CSV parsing
+    const csvParser = require('csv-parser');
+    const streamFs = require('fs');
+    
+    const users = [];
+    
+    // Parse CSV with proper library
+    await new Promise((resolve, reject) => {
+      streamFs.createReadStream(req.file.path)
+        .pipe(csvParser())
+        .on('data', (row) => {
+          users.push({ row: ++rowNumber, data: row });
+        })
+        .on('end', resolve)
+        .on('error', reject);
+    });
+
+    console.log('Parsed users:', users.length);
+
+    // Validate required fields from first row
+    if (users.length > 0) {
+      const firstRow = users[0].data;
+      const requiredFields = ['firstName', 'lastName', 'email', 'username'];
+      const missingFields = requiredFields.filter(field => !(field in firstRow));
+      
+      if (missingFields.length > 0) {
+        await fs.unlink(req.file.path);
         return res.status(400).json({
           success: false,
-          error: 'CSV file is required',
-          code: 'FILE_REQUIRED'
-        });
-      }
-
-      const results = [];
-      const errors = [];
-      let successCount = 0;
-      let errorCount = 0;
-
-      // Parse CSV file
-      const fileContent = await fs.readFile(req.file.path, 'utf-8');
-      const lines = fileContent.split('\n');
-      const headers = lines[0].split(',').map(h => h.trim());
-      
-      // Validate headers
-      const requiredHeaders = ['firstName', 'lastName', 'email', 'username'];
-      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-      
-      if (missingHeaders.length > 0) {
-        await fs.unlink(req.file.path); // Clean up file
-        return res.status(400).json({
-          success: false,
-          error: `Missing required headers: ${missingHeaders.join(', ')}`,
+          error: `Missing required columns: ${missingFields.join(', ')}`,
           code: 'INVALID_CSV_FORMAT'
         });
       }
+    }
 
-      // Process each row
-      for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue; // Skip empty lines
-        
-        const values = lines[i].split(',').map(v => v.trim());
-        const userData = {};
-        
-        headers.forEach((header, index) => {
-          userData[header] = values[index];
-        });
-
-        try {
-          // Check if user already exists
-          const existingUser = await User.findOne({
-            $or: [
-              { email: userData.email },
-              { username: userData.username }
-            ]
-          });
-
-          if (existingUser) {
-            errors.push({
-              row: i + 1,
-              data: userData,
-              error: 'User with this email or username already exists'
-            });
-            errorCount++;
-            continue;
-          }
-
-          // Create user with default password
-          const defaultPassword = 'ChangeMe123!';
-          const user = new User({
-            firstName: userData.firstName,
-            lastName: userData.lastName,
-            email: userData.email,
-            username: userData.username,
-            password: defaultPassword,
-            status: 'pending',
-            emailVerified: false,
-            createdBy: req.user.id
-          });
-
-          await user.save();
-          
-          results.push({
-            row: i + 1,
-            username: user.username,
-            email: user.email,
-            status: 'success'
-          });
-          successCount++;
-
-        } catch (error) {
+    // Process each row
+    for (const { row, data } of users) {
+      try {
+        // Skip rows with empty required fields
+        if (!data.firstName || !data.lastName || !data.email || !data.username) {
           errors.push({
-            row: i + 1,
-            data: userData,
-            error: error.message
+            row,
+            data,
+            error: 'Missing required fields'
           });
           errorCount++;
+          continue;
         }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({
+          $or: [
+            { email: data.email.trim() },
+            { username: data.username.trim() }
+          ]
+        });
+
+        if (existingUser) {
+          errors.push({
+            row,
+            data,
+            error: 'User with this email or username already exists'
+          });
+          errorCount++;
+          continue;
+        }
+
+        // Create user with default password
+        const defaultPassword = 'ChangeMe123!';
+        const user = new User({
+          firstName: data.firstName.trim(),
+          lastName: data.lastName.trim(),
+          email: data.email.trim(),
+          username: data.username.trim(),
+          password: defaultPassword,
+          status: 'pending',
+          emailVerified: false,
+          createdBy: req.user.id
+        });
+
+        await user.save();
+        
+        results.push({
+          row,
+          username: user.username,
+          email: user.email,
+          status: 'success'
+        });
+        successCount++;
+
+      } catch (error) {
+        console.log('Error creating user:', error.message);
+        errors.push({
+          row,
+          data,
+          error: error.message
+        });
+        errorCount++;
       }
-
-      // Clean up uploaded file
-      await fs.unlink(req.file.path);
-
-      // Log activity
-      await AuditLog.createEntry({
-        action: 'import_data',
-        actorType: 'user',
-        userId: req.user.id,
-        actorDetails: {
-          username: req.user.username,
-          email: req.user.email,
-          ipAddress: req.ip,
-          userAgent: req.get('User-Agent')
-        },
-        targetType: 'system',
-        targetId: req.user.id,
-        resource: 'bulk_user_import',
-        status: errorCount === 0 ? 'success' : 'partial_success',
-        category: 'admin',
-        details: {
-          successCount,
-          errorCount,
-          totalProcessed: successCount + errorCount
-        }
-      });
-
-      logger.info(`Bulk user import completed: ${successCount} success, ${errorCount} errors by ${req.user.username}`);
-
-      res.status(200).json({
-        success: true,
-        message: 'Bulk user import completed',
-        data: {
-          summary: {
-            totalProcessed: successCount + errorCount,
-            successCount,
-            errorCount
-          },
-          results,
-          errors: errors.length > 0 ? errors : undefined
-        }
-      });
-
-    } catch (error) {
-      logger.error('Bulk import users error:', error.message);
-      
-      // Clean up file if exists
-      if (req.file && req.file.path) {
-        await fs.unlink(req.file.path).catch(() => {});
-      }
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to import users',
-        code: 'BULK_IMPORT_ERROR'
-      });
     }
+
+    // Clean up uploaded file
+    await fs.unlink(req.file.path);
+
+    // Log activity
+    await AuditLog.createEntry({
+      action: 'import_data',
+      actorType: 'user',
+      userId: req.user.id,
+      actorDetails: {
+        username: req.user.username,
+        email: req.user.email,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      },
+      targetType: 'system',
+      targetId: req.user.id,
+      resource: 'bulk_user_import',
+      status: errorCount === 0 ? 'success' : 'partial',
+      category: 'admin'
+    });
+
+    logger.info(`Bulk user import completed: ${successCount} success, ${errorCount} errors`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Bulk user import completed',
+      data: {
+        summary: {
+          totalProcessed: successCount + errorCount,
+          successCount,
+          errorCount
+        },
+        results,
+        errors: errors.length > 0 ? errors : undefined
+      }
+    });
+
+  } catch (error) {
+    console.log('=== BULK IMPORT ERROR ===');
+    console.log('Error:', error.message);
+    
+    logger.error('Bulk import users error:', error.message);
+    
+    // Clean up file if exists
+    if (req.file && req.file.path) {
+      await fs.unlink(req.file.path).catch(() => {});
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to import users',
+      code: 'BULK_IMPORT_ERROR'
+    });
   }
+}
+
 
   // Bulk User Export (CSV)
   async bulkExportUsers(req, res) {
