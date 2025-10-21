@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { User, AuditLog } = require('../models');
 const logger = require('../utils/logger');
+const emailService = require('../services/emailService');
 const { validationResult } = require('express-validator');
 
 class EmailController {
