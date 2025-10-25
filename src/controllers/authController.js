@@ -2,6 +2,7 @@ const { User, Role, AuditLog } = require('../models');
 const jwtService = require('../utils/jwt');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
+const emailService = require('../services/emailService');
 
 class AuthController {
   /**
@@ -856,35 +857,15 @@ async login(req, res) {
   /**
    * Change password (authenticated user)
    */
- async changePassword(req, res) {
+async changePassword(req, res) {
   try {
-    console.log('=== CHANGE PASSWORD STARTED ===');
-    console.log('Request body:', req.body);
-    console.log('User ID from token:', req.user?.id);
+    const { currentPassword, newPassword } = req.body;
     
-    const { currentPassword, newPassword, confirmPassword } = req.body;
+    logger.info(`=== CHANGE PASSWORD STARTED ===`);
+    logger.info(`User: ${req.user.email}`);
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      return res.status(400).json({
-        success: false,
-        error: 'All password fields are required',
-        code: 'MISSING_FIELDS'
-      });
-    }
-
-    if (newPassword !== confirmPassword) {
-      return res.status(400).json({
-        success: false,
-        error: 'New passwords do not match',
-        code: 'PASSWORD_MISMATCH'
-      });
-    }
-
-    console.log('Step 1: About to find user...');
-    // Get user with password
     const user = await User.findById(req.user.id).select('+password');
-    console.log('Step 2: User found:', !!user);
-
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -893,90 +874,73 @@ async login(req, res) {
       });
     }
 
-    console.log('Step 3: About to verify current password...');
-    // Verify current password
-    const isCurrentPasswordValid = await user.correctPassword(
-      currentPassword, 
-      user.password
-    );
-    console.log('Step 4: Current password valid:', isCurrentPasswordValid);
-
-    if (!isCurrentPasswordValid) {
-      return res.status(400).json({
+    // Check if current password is correct
+    const isPasswordValid = await user.comparePassword(currentPassword);
+    
+    if (!isPasswordValid) {
+      logger.warn(`Invalid current password for user: ${user.email}`);
+      return res.status(401).json({
         success: false,
         error: 'Current password is incorrect',
-        code: 'INVALID_CURRENT_PASSWORD'
+        code: 'INVALID_PASSWORD'
       });
     }
 
-    console.log('Step 5: About to update password...');
     // Update password
     user.password = newPassword;
-    user.passwordChangedAt = new Date();
-    
-    console.log('Step 6: About to handle sessions...');
-    console.log('User activeSessions exists:', !!user.activeSessions);
-    console.log('Current sessionId:', req.tokenInfo?.sessionId);
-    
-    // Handle activeSessions safely
-    if (user.activeSessions && Array.isArray(user.activeSessions)) {
-      user.activeSessions = user.activeSessions.filter(
-        session => session.sessionId === req.tokenInfo?.sessionId
-      );
-    } else {
-      // If activeSessions doesn't exist, initialize it
-      user.activeSessions = [];
-    }
-
-    console.log('Step 7: About to save user...');
+    user.passwordChangedAt = Date.now();
     await user.save();
-    console.log('Step 8: User saved successfully');
 
-    console.log('Step 9: About to create audit log...');
-    // Log password change - wrap in try-catch to isolate audit log issues
+    logger.info(`✓ Password changed successfully for: ${user.email}`);
+
+    // Send password changed confirmation email
     try {
-      await AuditLog.createEntry({
-        action: 'password_change',
-        actorType: 'user',
-        userId: user._id,
-        actorDetails: {
-          username: user.username,
-          email: user.email,
-          ipAddress: req.ip,
-          userAgent: req.get('User-Agent')
-        },
-        targetType: 'user',
-        targetId: user._id,
-        resource: 'authentication',
-        status: 'success',
-        category: 'security',
-        sessionId: req.tokenInfo?.sessionId
-      });
-      console.log('Step 10: Audit log created successfully');
-    } catch (auditError) {
-      console.log('Audit log error (non-critical):', auditError.message);
-      // Continue execution even if audit log fails
+      await emailService.sendPasswordChangedEmail(
+        user.email,
+        user.firstName || user.username
+      );
+      logger.info(`✓ Password change confirmation email sent to: ${user.email}`);
+    } catch (emailError) {
+      logger.error(`✗ Failed to send password change confirmation: ${emailError.message}`);
+      // Don't fail the password change if email fails
     }
 
-    logger.info(`Password changed for user: ${user.email}`);
-    console.log('=== CHANGE PASSWORD COMPLETED ===');
+    // Log activity
+    await AuditLog.createEntry({
+      action: 'password_change',
+      actorType: 'user',
+      userId: user._id,
+      actorDetails: {
+        username: user.username,
+        email: user.email,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      },
+      targetType: 'user',
+      targetId: user._id,
+      resource: 'authentication',
+      status: 'success',
+      category: 'security'
+    });
+
+    logger.info(`=== CHANGE PASSWORD COMPLETED ===`);
 
     res.status(200).json({
       success: true,
-      message: 'Password changed successfully'
+      message: 'Password changed successfully. A confirmation email has been sent.',
+      data: {
+        passwordChangedAt: user.passwordChangedAt
+      }
     });
 
   } catch (error) {
-    console.log('=== CHANGE PASSWORD ERROR ===');
-    console.log('Error message:', error.message);
-    console.log('Error stack:', error.stack);
-    
-    logger.error('Change password error:', error.message);
+    logger.error('=== CHANGE PASSWORD ERROR ===');
+    logger.error(`Error: ${error.message}`);
     
     res.status(500).json({
       success: false,
-      error: 'Password change failed',
-      code: 'CHANGE_PASSWORD_ERROR'
+      error: 'Failed to change password',
+      code: 'PASSWORD_CHANGE_ERROR'
     });
   }
 }

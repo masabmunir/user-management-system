@@ -20,8 +20,8 @@ class EmailController {
 
       const { email } = req.body;
       
-      console.log('=== SEND VERIFICATION EMAIL STARTED ===');
-      console.log('Email:', email);
+      logger.info(`=== SEND VERIFICATION EMAIL STARTED ===`);
+      logger.info(`Email: ${email}`);
       
       // Find user
       const user = await User.findOne({ email });
@@ -33,8 +33,7 @@ class EmailController {
         });
       }
 
-      console.log('User found, status:', user.status);
-      console.log('Email verified:', user.emailVerified);
+      logger.info(`User found - Status: ${user.status}, Email verified: ${user.emailVerified}`);
 
       if (user.emailVerified) {
         return res.status(400).json({
@@ -53,19 +52,23 @@ class EmailController {
       }
 
       // Generate verification token
-      console.log('Generating verification token...');
+      logger.info('Generating verification token...');
       const verificationToken = user.createEmailVerificationToken();
       await user.save();
+      logger.info('Verification token generated and saved');
 
-      console.log('Verification token generated and saved');
-
-      // In production, you would send an actual email here
-      // For development/testing, we'll return the token
-      // TODO: Replace with actual email service
-      /*
-      const emailService = require('../services/emailService');
-      await emailService.sendVerificationEmail(user.email, verificationToken);
-      */
+      // Send verification email using email service
+      try {
+        await emailService.sendVerificationEmail(
+          user.email,
+          verificationToken,
+          user.firstName || user.username
+        );
+        logger.info(`✓ Verification email sent successfully to: ${email}`);
+      } catch (emailError) {
+        logger.error(`✗ Failed to send email: ${emailError.message}`);
+        // Continue anyway - token is saved, user can request resend
+      }
 
       // Log the action
       await AuditLog.createEntry({
@@ -84,26 +87,27 @@ class EmailController {
         category: 'authentication'
       });
 
-      logger.info(`Email verification token sent to: ${email}`);
-      console.log('=== SEND VERIFICATION EMAIL COMPLETED ===');
+      logger.info(`=== SEND VERIFICATION EMAIL COMPLETED ===`);
 
       res.status(200).json({
         success: true,
         message: 'Verification email sent successfully',
         data: {
           message: 'Please check your email for verification instructions',
-          // Remove this in production - only for development/testing
+          email: user.email,
+          expiresIn: '24 hours',
+          // Only show in development mode
           ...(process.env.NODE_ENV === 'development' && { 
             verificationToken,
-            verificationUrl: `http://localhost:${process.env.PORT || 3000}/api/email/verify/${verificationToken}`
+            verificationUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${verificationToken}`,
+            note: 'Token shown only in development mode'
           })
         }
       });
 
     } catch (error) {
-      console.log('=== SEND VERIFICATION EMAIL ERROR ===');
-      console.log('Error:', error.message);
-      logger.error('Send verification email error:', error.message);
+      logger.error('=== SEND VERIFICATION EMAIL ERROR ===');
+      logger.error(`Error: ${error.message}`);
       
       res.status(500).json({
         success: false,
@@ -118,9 +122,8 @@ class EmailController {
     try {
       const { token } = req.params;
 
-      console.log('=== EMAIL VERIFICATION STARTED ===');
-      console.log('Token received:', !!token);
-      console.log('Token length:', token?.length);
+      logger.info('=== EMAIL VERIFICATION STARTED ===');
+      logger.info(`Token received: ${!!token}`);
 
       if (!token) {
         return res.status(400).json({
@@ -131,13 +134,13 @@ class EmailController {
       }
 
       // Hash the token to match database
-      console.log('Hashing token for database lookup...');
+      logger.info('Hashing token for database lookup...');
       const hashedToken = crypto
         .createHash('sha256')
         .update(token)
         .digest('hex');
 
-      console.log('Looking for user with hashed token...');
+      logger.info('Looking for user with valid token...');
       
       // Find user with valid token
       const user = await User.findOne({
@@ -145,19 +148,20 @@ class EmailController {
         emailVerificationExpires: { $gt: Date.now() }
       });
 
-      console.log('User found:', !!user);
+      logger.info(`User found: ${!!user}`);
 
       if (!user) {
-        console.log('Invalid or expired token');
+        logger.warn('Invalid or expired token');
         return res.status(400).json({
           success: false,
           error: 'Invalid or expired verification token',
-          code: 'INVALID_TOKEN'
+          code: 'INVALID_TOKEN',
+          message: 'The verification link has expired or is invalid. Please request a new verification email.'
         });
       }
 
-      console.log('Token valid, activating user...');
-      console.log('User current status:', user.status);
+      logger.info(`Token valid, activating user: ${user.email}`);
+      logger.info(`Current status: ${user.status}`);
 
       // Activate user
       user.emailVerified = true;
@@ -167,9 +171,20 @@ class EmailController {
       
       await user.save();
 
-      console.log('User activated successfully');
-      console.log('New status:', user.status);
-      console.log('Email verified:', user.emailVerified);
+      logger.info(`✓ User activated successfully`);
+      logger.info(`New status: ${user.status}, Email verified: ${user.emailVerified}`);
+
+      // Send welcome email
+      try {
+        await emailService.sendWelcomeEmail(
+          user.email,
+          user.firstName || user.username
+        );
+        logger.info(`✓ Welcome email sent to: ${user.email}`);
+      } catch (emailError) {
+        logger.error(`✗ Failed to send welcome email: ${emailError.message}`);
+        // Don't fail the verification if welcome email fails
+      }
 
       // Log the verification
       await AuditLog.createEntry({
@@ -188,8 +203,7 @@ class EmailController {
         category: 'security'
       });
 
-      logger.info(`User email verified and activated: ${user.email}`);
-      console.log('=== EMAIL VERIFICATION COMPLETED ===');
+      logger.info(`=== EMAIL VERIFICATION COMPLETED ===`);
 
       res.status(200).json({
         success: true,
@@ -200,18 +214,21 @@ class EmailController {
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,
+            username: user.username,
             status: user.status,
             emailVerified: user.emailVerified
+          },
+          nextSteps: {
+            message: 'You can now log in to your account',
+            loginUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`
           }
         }
       });
 
     } catch (error) {
-      console.log('=== EMAIL VERIFICATION ERROR ===');
-      console.log('Error:', error.message);
-      console.log('Stack:', error.stack);
-      
-      logger.error('Email verification error:', error.message);
+      logger.error('=== EMAIL VERIFICATION ERROR ===');
+      logger.error(`Error: ${error.message}`);
+      logger.error(`Stack: ${error.stack}`);
       
       res.status(500).json({
         success: false,
@@ -236,8 +253,8 @@ class EmailController {
 
       const { email } = req.body;
       
-      console.log('=== RESEND VERIFICATION EMAIL STARTED ===');
-      console.log('Email:', email);
+      logger.info('=== RESEND VERIFICATION EMAIL STARTED ===');
+      logger.info(`Email: ${email}`);
       
       const user = await User.findOne({ email });
       if (!user) {
@@ -265,8 +282,23 @@ class EmailController {
       }
 
       // Generate new verification token
+      logger.info('Generating new verification token...');
       const verificationToken = user.createEmailVerificationToken();
       await user.save();
+      logger.info('New verification token generated');
+
+      // Send verification email using email service
+      try {
+        await emailService.sendVerificationEmail(
+          user.email,
+          verificationToken,
+          user.firstName || user.username
+        );
+        logger.info(`✓ Verification email resent successfully to: ${email}`);
+      } catch (emailError) {
+        logger.error(`✗ Failed to send email: ${emailError.message}`);
+        // Continue anyway - token is saved
+      }
 
       // Log the action
       await AuditLog.createEntry({
@@ -285,26 +317,27 @@ class EmailController {
         category: 'authentication'
       });
 
-      logger.info(`Email verification resent to: ${email}`);
-      console.log('=== RESEND VERIFICATION EMAIL COMPLETED ===');
+      logger.info('=== RESEND VERIFICATION EMAIL COMPLETED ===');
 
       res.status(200).json({
         success: true,
         message: 'Verification email resent successfully',
         data: {
           message: 'Please check your email for new verification instructions',
-          // Remove this in production
+          email: user.email,
+          expiresIn: '24 hours',
+          // Only show in development mode
           ...(process.env.NODE_ENV === 'development' && { 
             verificationToken,
-            verificationUrl: `http://localhost:${process.env.PORT || 3000}/api/email/verify/${verificationToken}`
+            verificationUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${verificationToken}`,
+            note: 'Token shown only in development mode'
           })
         }
       });
 
     } catch (error) {
-      console.log('=== RESEND VERIFICATION EMAIL ERROR ===');
-      console.log('Error:', error.message);
-      logger.error('Resend verification email error:', error.message);
+      logger.error('=== RESEND VERIFICATION EMAIL ERROR ===');
+      logger.error(`Error: ${error.message}`);
       
       res.status(500).json({
         success: false,

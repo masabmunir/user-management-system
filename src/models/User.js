@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const { type } = require('os');
 
 const userSchema = new mongoose.Schema({
   // Basic Information
@@ -95,6 +96,11 @@ const userSchema = new mongoose.Schema({
   passwordResetToken: String,
   passwordResetExpires: Date,
   passwordChangedAt: Date,
+  
+  emailVerified: {
+    type: Boolean,
+    default: false
+  },
 
   // Multi-Factor Authentication
   twoFactorEnabled: {
@@ -272,6 +278,20 @@ userSchema.methods.createEmailVerificationToken = function () {
   this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
 
   return verificationToken;
+};
+
+// Create password reset token
+userSchema.methods.createPasswordResetToken = function() {
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  
+  this.passwordResetToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+  
+  this.passwordResetExpires = Date.now() + 60 * 60 * 1000;
+  
+  return resetToken;
 };
 
 // Instance method to increment login attempts
