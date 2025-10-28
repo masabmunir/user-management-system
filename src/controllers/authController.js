@@ -134,9 +134,138 @@ class AuthController {
     }
   }
 
-  /**
-   * User login
-   */
+ /**
+ * Verify email with token
+ */
+
+async verifyEmail(req, res) {
+  try {
+    const { token } = req.params;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification token required',
+        code: 'TOKEN_REQUIRED'
+      });
+    }
+
+    // Hash the token to match database
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await User.findOne({
+      emailVerificationToken: hashedToken,
+      emailVerificationExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired verification token',
+        code: 'INVALID_TOKEN'
+      });
+    }
+
+    // Activate user
+    user.emailVerified = true;
+    user.status = 'active';
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpires = undefined;
+    await user.save();
+
+    // Send welcome email
+    await emailService.sendWelcomeEmail(
+      user.email,
+      `${user.firstName} ${user.lastName}`
+    );
+
+    // Log verification
+    await AuditLog.createEntry({
+      action: 'email_verification',
+      actorType: 'user',
+      userId: user._id,
+      targetType: 'user',
+      targetId: user._id,
+      resource: 'authentication',
+      status: 'success',
+      category: 'security'
+    });
+
+    logger.info(`User email verified and activated: ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Email verified successfully. Your account is now active!',
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          status: user.status,
+          emailVerified: user.emailVerified
+        }
+      }
+    });
+
+  } catch (error) {
+    logger.error('Email verification error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Email verification failed',
+      code: 'VERIFICATION_ERROR'
+    });
+  }
+}
+
+/**
+ * Resend verification email
+ */
+
+async resendVerification(req, res) {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        code: 'USER_NOT_FOUND'
+      });
+    }
+
+    if (user.emailVerified) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email already verified',
+        code: 'ALREADY_VERIFIED'
+      });
+    }
+
+    const verificationToken = user.createEmailVerificationToken();
+    await user.save();
+
+    await emailService.sendVerificationEmail(
+      email,
+      `${user.firstName} ${user.lastName}`
+    );
+
+    logger.info(`Verification email resent to: ${email}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Verification email sent successfully'
+    });
+
+  } catch (error) {
+    logger.error('Resend verification error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send verification email',
+      code: 'EMAIL_SEND_ERROR'
+    });
+  }
+}
+
 /**
  * User login with detailed debugging
  */
@@ -765,13 +894,98 @@ async login(req, res) {
       });
     }
   }
+/**
+ * Forgot password - send reset link
+ */
+// ============================================
+// TEMPORARY DEBUG VERSION - Replace your forgotPassword method
+// ============================================
 
+async forgotPassword(req, res) {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required',
+        code: 'EMAIL_REQUIRED'
+      });
+    }
+
+    const user = await User.findOne({ email });
+    
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        message: 'If the email exists, a password reset link has been sent'
+      });
+    }
+
+    // Check if method exists
+    if (typeof user.createPasswordResetToken !== 'function') {
+      throw new Error('createPasswordResetToken method not found');
+    }
+
+    const resetToken = user.createPasswordResetToken();
+    
+    await user.save();
+
+    try {
+      await emailService.sendPasswordResetEmail(
+        email,
+        resetToken,
+        `${user.firstName} ${user.lastName}`
+      );
+    } catch (emailError) {
+      logger.error(emailError.stack);
+      // Continue even if email fails in development
+      if (process.env.NODE_ENV === 'production') {
+        throw emailError;
+      }
+    }
+
+    await AuditLog.createEntry({
+      action: 'password_reset_request',
+      actorType: 'user',
+      userId: user._id,
+      targetType: 'user',
+      targetId: user._id,
+      resource: 'authentication',
+      status: 'success',
+      category: 'security'
+    });
+
+
+    res.status(200).json({
+      success: true,
+      message: 'If the email exists, a password reset link has been sent',
+      // For development only
+      ...(process.env.NODE_ENV === 'development' && { 
+        resetToken,
+        resetUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`
+      })
+    });
+
+  } catch (error) {
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process password reset request',
+      code: 'PASSWORD_RESET_ERROR',
+      ...(process.env.NODE_ENV === 'development' && { 
+        details: error.message 
+      })
+    });
+  }
+}
   /**
    * Reset password with token
    */
   async resetPassword(req, res) {
     try {
-      const { token, password, confirmPassword } = req.body;
+      const { token } = req.params;
+      const { password, confirmPassword } = req.body;
 
       if (!token || !password || !confirmPassword) {
         return res.status(400).json({

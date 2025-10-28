@@ -69,9 +69,6 @@ const passwordResetRequestValidation = [
 ];
 
 const passwordResetValidation = [
-  body('token')
-    .notEmpty()
-    .withMessage('Reset token is required'),
   body('password')
     .isLength({ min: 8 })
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
@@ -102,7 +99,14 @@ const changePasswordValidation = [
     })
 ];
 
-// Public routes (no authentication required)
+const resendVerificationValidation = [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Valid email is required')
+];
+
+// ==================== PUBLIC ROUTES ====================
 
 /**
  * @route   POST /api/auth/register
@@ -115,6 +119,30 @@ router.post(
   validateRequest,
   logActivity('register', 'user'),
   authController.register
+);
+
+/**
+ * @route   GET /api/auth/verify-email/:token
+ * @desc    Verify email address with token
+ * @access  Public
+ */
+router.get(
+  '/verify-email/:token',
+  logActivity('email_verification', 'authentication'),
+  authController.verifyEmail
+);
+
+/**
+ * @route   POST /api/auth/resend-verification
+ * @desc    Resend email verification link
+ * @access  Public
+ */
+router.post(
+  '/resend-verification',
+  resendVerificationValidation,
+  validateRequest,
+  logActivity('resend_verification', 'authentication'),
+  authController.resendVerification
 );
 
 /**
@@ -151,16 +179,16 @@ router.post(
   passwordResetRequestValidation,
   validateRequest,
   logActivity('password_reset_request', 'authentication'),
-  authController.requestPasswordReset
+  authController.forgotPassword,
 );
 
 /**
- * @route   POST /api/auth/reset-password
+ * @route   POST /api/auth/reset-password/:token
  * @desc    Reset password with token
  * @access  Public
  */
 router.post(
-  '/reset-password',
+  '/reset-password/:token',
   passwordResetValidation,
   validateRequest,
   logActivity('password_reset', 'authentication'),

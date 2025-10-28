@@ -8,6 +8,7 @@ const auditLogSchema = new mongoose.Schema({
         enum: [
             'create', 'read', 'update', 'delete', 'login', 'logout',
             'password_change', 'password_reset', 'email_verification',
+            'resend_verification','password_reset_request','resetPassword',
             'role_assigned', 'role_removed', 'permission_granted', 'permission_revoked',
             'account_locked', 'account_unlocked', 'account_suspended', 'account_activated',
             'export_data', 'import_data', 'backup_created', 'system_config_changed',
